@@ -7,11 +7,6 @@ object Quorum {
 	def right (idx: Int) : Int = 2 * idx + 2
 	def parent (idx: Int): Int = (idx - 1) / 2
 	def isLeafOf (idx: Int, tree: Vector[ActorRef]): Boolean = if ( left(idx) > tree.length && right(idx) > tree.length) true else false
-	def getChild(idx: Int, tree: Vector[ActorRef]) : Map[Int, ActorRef] = {
-		if (idx < tree.length)
-			return Map(idx -> tree(idx))
-		return Map() 
-	}
 }
 
 case class QuorumTree(tree: Vector[ActorRef])
