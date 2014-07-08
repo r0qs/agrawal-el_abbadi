@@ -15,10 +15,3 @@ object Quorum {
 }
 
 case class QuorumTree(tree: Vector[ActorRef])
-
-	/**
-	 * TODO: 
-	 *  - Generate a random tree
-	 *  - Raise a error when a Leaf is inaccessible (Quorum cannot be formed)
-	 *  - def GetQuorum
-	 */
