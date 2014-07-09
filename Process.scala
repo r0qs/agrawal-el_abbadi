@@ -1,9 +1,10 @@
 package agrawal
 
-//import scala.collection.immutable.Map
-//import scala.collection.breakOut
-import scala.collection.mutable.Queue
-import scala.collection.mutable.Set
+import java.io.{ FileWriter, PrintWriter }
+import scala.io.Source
+import scala.collection.immutable.Map
+import scala.collection.breakOut
+import scala.collection.mutable.{ Queue, Set }
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.Random
@@ -34,11 +35,12 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
   	private var crashed : Set[ActorRef] = Set.empty[ActorRef]
 	private val pending = Queue.empty[(Int, ActorRef)]
   	private val requests = Queue.empty[(Int, ActorRef)]
-	//private var procMap : Map[ActorRef, Int] = Map()
+	private var procMap : Map[ActorRef, Int] = Map()
 	//private var crashed = Set[ActorRef]()
 	//private val requests = Queue[Map(Int, ActorRef)]
 
 	def dice = Random.nextBoolean
+	def getNextLetter(s: String) : Char = ('a' + ((s(0) -'a' + 1) % 26)).toChar
 	
 	def sendRequest() {
 		if (requests.nonEmpty) {
@@ -98,21 +100,16 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
   	def passive : Receive = LoggingReceive {
 		case QuorumTree(t) => 
 			tree = t
-			//procMap = tree.map(e => (e, tree.indexOf(e)))(breakOut)
+			procMap = tree.map(e => (e, tree.indexOf(e)))(breakOut).toMap
 			sender ! Done
 			println("Process "+ pid + " start")
 			println("Crashed of: " +pid+ " -> " + crashed)
-			startIn(waitTime)
-		case WakeUp =>
-			println("PROCESS: " + pid + " WAKEUP!!!!!!!")
-			crashed -= self
-			tree.foreach(_ ! Update)
 			startIn(waitTime)
 	}
 	
 	def critical : Receive = LoggingReceive {
 		case Resource.Done =>
-			// exit critical section
+			// Exit critical section
 			permissions.foreach(_ ! Released)
 			permissions.clear()
 			println("SAI: " + pid)
@@ -136,8 +133,8 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 				val lid = left(id)
 				val rid = right(id)
 				if (lid < tree.length && rid < tree.length) {
-					//try to get permission from internodes (always try left first), use futures and timeout
-					//try append left or right
+					// Try to get permission from internodes (left or right)
+					// TODO: use futures and timeout
 					if(dice) {
 						requests.enqueue(lid -> tree(lid))
 					} else {
@@ -157,7 +154,30 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 				// Enter in critical section
 				println("ENTREI: "+ pid)
 				resource ! Resource.Add(pid, self, permissions)
-				context.become(critical)
+				//context.become(critical)
+
+				val source = Source.fromFile("shared.txt")
+				var append : Boolean = true
+				var c = 'a'
+//				val regex = """([a-z])\s(\d)\s[-](\s\d)+""".r
+				if(source.hasNext) {
+//					val lastLine = source.getLines.toList.last.split(" ") match { case Array(x, y) => (x, y.toInt)}
+					val lastLine = source.getLines.toList.last.lines.map(_.split(" ")).map(split => (split(0), split(1).toInt, split.slice(3,split.size).takeWhile(_ != '\n'))).toList.view
+					c = getNextLetter(lastLine(0)._1)
+					if (c == 'a') append = false
+				}
+				source.close()
+
+				val dest = new PrintWriter(new FileWriter("shared.txt", append))
+				dest.print(c.toString + " " + pid + " - ")
+				permissions.foreach(p => dest.print(procMap(p) + " "))
+				dest.println()
+				dest.close()
+				
+				permissions.foreach(_ ! Released)
+				permissions.clear()
+				println("SAI: " + pid)
+				startIn(waitTime)
 			}
 		case Released =>
 			pending.dequeue
