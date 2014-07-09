@@ -20,7 +20,7 @@ class Resource extends Actor {
 	def receive = LoggingReceive {
 		case Add(id: Int, ref: ActorRef, quorum: Set[ActorRef]) =>	
 					accessList += id
-					println(" Process " + id + " add to access list: " + accessList)
+					println("Process " + id + " add to access list: " + accessList)
 					println("Quorum: " + quorum)
 					sender ! Done
 		case Get => sender ! accessList

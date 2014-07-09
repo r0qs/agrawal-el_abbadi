@@ -18,13 +18,13 @@ object Process {
 	case class Crashed(id: Int, crash: ActorRef)
 	case class Request(sid: Int)
 	case class Permission(sid: Int)
+	case class Start(tree: Vector[ActorRef])
 	case object Released
+	case object Restart
 	case object WantUseResource
 	case object Abort
 	case object Sleep
-	case object WakeUp
 	case object Update
-	case object Done
 }
 
 class Process(pid: Int, resource: ActorRef) extends Actor {
@@ -86,24 +86,25 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 	}
 
 	def stop(): Unit = {
-		context.parent ! Done
+		//context.parent ! Done
 		context.stop(self)
 	}
 
 	private def startIn(duration: FiniteDuration): Unit = {
 		context.become(active)
-		context.system.scheduler.scheduleOnce(duration*(Random.nextInt(5)+1), self, WantUseResource)
+		context.system.scheduler.scheduleOnce(duration*(Random.nextInt(2)+1), self, WantUseResource)
 	}
  
  	def receive = passive
 
   	def passive : Receive = LoggingReceive {
-		case QuorumTree(t) => 
+		case Start(t) => 
 			tree = t
 			procMap = tree.map(e => (e, tree.indexOf(e)))(breakOut).toMap
-			sender ! Done
-			println("Process "+ pid + " start")
-			println("Crashed of: " +pid+ " -> " + crashed)
+			startIn(waitTime)
+		case Restart =>
+			crashed -= self
+			tree.foreach(_ ! Update)
 			startIn(waitTime)
 	}
 	
@@ -112,16 +113,16 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 			// Exit critical section
 			permissions.foreach(_ ! Released)
 			permissions.clear()
-			println("SAI: " + pid)
 			startIn(waitTime)
 		case Resource.Failed =>
-			// send fail msg to parent
+			// TODO: send fail msg to parent
+			//context.parent ! Done
 			context.stop(self)
 	}
 
 	def active : Receive = LoggingReceive {
   		case Request(fromId) =>
-	  		pending.enqueue(fromId -> sender)
+			pending.enqueue(fromId -> sender)
 			val (id, to) = pending.head
      		if (to == sender) {
 				sendPermission()
@@ -140,8 +141,7 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 					} else {
 						requests.enqueue(rid -> tree(rid))
 					}
-				}
-				else if (lid < tree.length) {
+				} else if (lid < tree.length) {
 						requests.enqueue(lid -> tree(lid))
 				} else if(rid < tree.length) {
 						requests.enqueue(rid -> tree(rid))
@@ -152,9 +152,7 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 			}
 			else {
 				// Enter in critical section
-				println("ENTREI: "+ pid)
 				resource ! Resource.Add(pid, self, permissions)
-				//context.become(critical)
 
 				val source = Source.fromFile("shared.txt")
 				var append : Boolean = true
@@ -174,10 +172,11 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 				dest.println()
 				dest.close()
 				
+				//context.become(critical)
 				permissions.foreach(_ ! Released)
 				permissions.clear()
-				println("SAI: " + pid)
 				startIn(waitTime)
+				// Exit critical section
 			}
 		case Released =>
 			pending.dequeue
@@ -200,14 +199,14 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 			}
 		case WantUseResource =>
 			//append root to requests
-			println("Process " + pid + " want to enter in critical section")
 			requests.enqueue(0 -> tree(0))
 			sendRequest()
+		case Update =>
+			crashed -= sender
 		case Abort	=> 
 			stop()
 		case Sleep =>
 			context.become(passive)
-		case _ : Status.Failure =>
-			stop()
+		case _  =>
 	}
 }

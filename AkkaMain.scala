@@ -10,7 +10,8 @@ import Process._
 import Quorum._
 
 object AkkaMain {
-	case object KnockSomeone
+	case object Stop
+	case object Restart
 }
 
 class AkkaMain extends Actor {
@@ -34,15 +35,18 @@ class AkkaMain extends Actor {
 
 	// A complete tree
 	var tree : Vector[ActorRef] = gen_simple_binary_tree(7, tree)
-	tree.foreach(_ ! QuorumTree(tree))
+	tree.foreach(_ ! Start(tree))
 	
-	context.system.scheduler.scheduleOnce(5.seconds, self, KnockSomeone)
-	context.system.scheduler.scheduleOnce(15.seconds, self, KnockSomeone)
-	context.system.scheduler.scheduleOnce(30.seconds, self, KnockSomeone)
+	context.system.scheduler.scheduleOnce(5.seconds, self, Stop)
+	context.system.scheduler.scheduleOnce(15.seconds, self, Stop)
+	//context.system.scheduler.scheduleOnce(15.seconds, self, Restart)
+	context.system.scheduler.scheduleOnce(30.seconds, self, Stop)
 
 	def receive = LoggingReceive {
-		case Done => println("Done Received from: " + sender) 
-		case KnockSomeone => get_out()
-		case _ => println("Eita: " + sender)
+		case Stop => get_out()
+		case Restart => 
+			tree(crashed.head) ! Process.Restart
+			crashed -= crashed.head
+		case _ => println("Receive a unexpected message from: " + sender)
 	}
 }
