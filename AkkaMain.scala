@@ -11,7 +11,6 @@ import Quorum._
 
 object AkkaMain {
 	case class Stop(id: Int)
-	case object Restart
 }
 
 class AkkaMain extends Actor {
@@ -40,13 +39,9 @@ class AkkaMain extends Actor {
 	context.system.scheduler.scheduleOnce(15.seconds, self, Stop(1))
 	context.system.scheduler.scheduleOnce(40.seconds, self, Stop(0))
 	context.system.scheduler.scheduleOnce(60.seconds, self, Stop(2))
-	//context.system.scheduler.scheduleOnce(15.seconds, self, Restart)
 
 	def receive = LoggingReceive {
 		case Stop(id) => get_out(id)
-		case Restart => 
-			tree(crashed.head) ! Process.Restart
-			crashed -= crashed.head
 		case _ => println("Receive a unexpected message from: " + sender)
 	}
 }

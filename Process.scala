@@ -14,17 +14,16 @@ import Quorum._
 
 object Process {
 	def props(id: Int, resource: ActorRef): Props = Props(new Process(id, resource))
-	// Messages
+	// Protocol Messages
 	case class Crashed(id: Int, crash: ActorRef)
 	case class Request(sid: Int)
 	case class Permission(sid: Int)
-	case class Start(tree: Vector[ActorRef])
 	case object Released
-	case object Restart
+	// Control Messages
+	case class Start(tree: Vector[ActorRef])
 	case object WantUseResource
 	case object Abort
 	case object Sleep
-	case object Update
 }
 
 class Process(pid: Int, resource: ActorRef) extends Actor {
@@ -35,8 +34,6 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 	private val pending = Queue.empty[(Int, ActorRef)]
   	private val requests = Queue.empty[(Int, ActorRef)]
 	private var procMap : Map[ActorRef, Int] = Map()
-	//private var crashed = Set[ActorRef]()
-	//private val requests = Queue[Map(Int, ActorRef)]
 
 	def dice = Random.nextBoolean
 	def waitTime = (Random.nextInt(2)+1).seconds
@@ -71,8 +68,7 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 			sendRequest()
 		}
 		else {
-			println(pid + " LEAF reached " + id)
-			//start new attempt to enter in the critical section and abort the actual
+			// Start new attempt to enter in the critical section and abort the actual
 			permissions.clear()
 			startIn(waitTime)
 		}
@@ -107,24 +103,9 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 			tree = t
 			procMap = tree.map(e => (e, tree.indexOf(e)))(breakOut).toMap
 			startIn(waitTime)
-		case Restart =>
-			crashed -= self
-			tree.foreach(_ ! Update)
-			startIn(waitTime)
 	}
 	
-	def critical : Receive = LoggingReceive {
-		case Resource.Done =>
-			// Exit critical section
-			permissions.foreach(_ ! Released)
-			permissions.clear()
-			startIn(waitTime)
-		case Resource.Failed =>
-			// TODO: send fail msg to parent
-			//context.parent ! Done
-			context.stop(self)
-	}
-
+	// TODO: Send fail msg to parent (Use Supervision to handle with failures)
 	def active : Receive = LoggingReceive {
   		case Request(fromId) =>
 			println(pid + " receive REQUEST from " + fromId)
@@ -141,9 +122,8 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 				if (!isLeafOf(id, tree)){
 					val lid = left(id)
 					val rid = right(id)
+					// Try to get permission from inner nodes, preferably left than right
 					if (lid < tree.length && rid < tree.length) {
-						// Try to get permission from internodes (left or right)
-						// TODO: use futures and timeout
 						requests.enqueue(lid -> tree(lid))
 					} else if (lid < tree.length) {
 							requests.enqueue(lid -> tree(lid))
@@ -156,14 +136,10 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 				}
 				else {
 					// Enter in critical section
-					resource ! Resource.Add(pid, self, permissions)
-
 					val source = Source.fromFile("shared.txt")
 					var append : Boolean = true
 					var c = 'a'
-//					val regex = """([a-z])\s(\d)\s[-](\s\d)+""".r
 					if(source.hasNext) {
-//						val lastLine = source.getLines.toList.last.split(" ") match { case Array(x, y) => (x, y.toInt)}
 						val lastLine = source.getLines.toList.last.lines.map(_.split(" ")).map(split => (split(0), split(1).toInt, split.slice(3,split.size).takeWhile(_ != '\n'))).toList.view
 						c = getNextLetter(lastLine(0)._1)
 						if (c == 'a') append = false
@@ -176,7 +152,6 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 					dest.println()
 					dest.close()
 				
-					//context.become(critical)
 					//permissions.foreach(_ ! Released)
 					for (to <- permissions) { context.system.scheduler.scheduleOnce(waitTime, to, Released)}
 					permissions.clear()
@@ -211,15 +186,13 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 				}
 			}
 		case WantUseResource =>
-			//append root to requests
+			// Append root to requests
 			requests.enqueue(0 -> tree(0))
 			sendRequest()
-		case Update =>
-			crashed -= sender
 		case Abort	=> 
 			context.stop(self)
 		case Sleep =>
 			context.become(passive)
-		case _  =>
+		case _ => // FIXME: Ignore other messages
 	}
 }
