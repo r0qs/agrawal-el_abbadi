@@ -10,7 +10,7 @@ import Process._
 import Quorum._
 
 object AkkaMain {
-	case object Stop
+	case class Stop(id: Int)
 	case object Restart
 }
 
@@ -24,10 +24,10 @@ class AkkaMain extends Actor {
 		if (n == 1) Vector() :+ context.actorOf(Process.props(n-1, resource), s"p${n-1}")
 		else gen_simple_binary_tree(n-1, t) :+ context.actorOf(Process.props(n-1, resource), s"p${n-1}")
 
-	def get_out() {
-		var i = Random.nextInt(tree.length/2)
-		while (crashed contains i)
-			i = Random.nextInt(tree.length/2)
+	def get_out(i: Int) {
+//		var i = Random.nextInt(tree.length/2)
+//		while (crashed contains i)
+//			i = Random.nextInt(tree.length/2)
 		crashed += i
 		tree.foreach(_ ! Crashed(i, tree(i)))
 
@@ -37,13 +37,13 @@ class AkkaMain extends Actor {
 	var tree : Vector[ActorRef] = gen_simple_binary_tree(7, tree)
 	tree.foreach(_ ! Start(tree))
 	
-	context.system.scheduler.scheduleOnce(5.seconds, self, Stop)
-	context.system.scheduler.scheduleOnce(15.seconds, self, Stop)
+	context.system.scheduler.scheduleOnce(15.seconds, self, Stop(1))
+	context.system.scheduler.scheduleOnce(40.seconds, self, Stop(0))
+	context.system.scheduler.scheduleOnce(60.seconds, self, Stop(2))
 	//context.system.scheduler.scheduleOnce(15.seconds, self, Restart)
-	context.system.scheduler.scheduleOnce(30.seconds, self, Stop)
 
 	def receive = LoggingReceive {
-		case Stop => get_out()
+		case Stop(id) => get_out(id)
 		case Restart => 
 			tree(crashed.head) ! Process.Restart
 			crashed -= crashed.head

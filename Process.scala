@@ -29,7 +29,6 @@ object Process {
 
 class Process(pid: Int, resource: ActorRef) extends Actor {
 	import Process._
-	private val waitTime = 3.seconds
 	private var tree : Vector[ActorRef] = Vector()
   	private var permissions : Set[ActorRef] =  Set.empty[ActorRef]
   	private var crashed : Set[ActorRef] = Set.empty[ActorRef]
@@ -40,15 +39,21 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 	//private val requests = Queue[Map(Int, ActorRef)]
 
 	def dice = Random.nextBoolean
+	def waitTime = (Random.nextInt(2)+1).seconds
 	def getNextLetter(s: String) : Char = ('a' + ((s(0) -'a' + 1) % 26)).toChar
-	
+	def showQueue(q: Queue[(Int, ActorRef)]) = q.map(p => p._1)
+
 	def sendRequest() {
-		if (requests.nonEmpty) {
-			val (id, to) = requests.head
-			if (!(crashed contains to))
-				to ! Request(pid)
-			else
-				headRequestCrashed()
+		println(pid + " REQUEST " + showQueue(requests))
+		val (id, to) = requests.head
+		if (!(crashed contains to)) {
+			println(pid + " send REQUEST to " + id)
+			context.system.scheduler.scheduleOnce(waitTime, to, Request(pid))
+			//to ! Request(pid)
+		}
+		else {
+			println(pid + " HEAD REQUEST CRASH " + id)
+			headRequestCrashed()
 		}
 	}
 
@@ -66,7 +71,7 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 			sendRequest()
 		}
 		else {
-			println("Leaf reached")
+			println(pid + " LEAF reached " + id)
 			//start new attempt to enter in the critical section and abort the actual
 			permissions.clear()
 			startIn(waitTime)
@@ -74,25 +79,25 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 	}
 
 	def sendPermission() {
+		println(pid + " PENDING " + showQueue(pending))
 		if (pending.nonEmpty) {
 			val (id, to) = pending.head
-			if (!(crashed contains to))
-				to ! Permission(pid)
+			if (!(crashed contains to)) {
+				println(pid + " send PERMISSION to " + id)
+				context.system.scheduler.scheduleOnce(waitTime, to, Permission(pid))
+				//to ! Permission(pid)
+			}
 			else {
+				println(pid + " HEAD PERMISSION CRASH " + id)
 				pending.dequeue
 				sendPermission()
 			}
 		}
 	}
 
-	def stop(): Unit = {
-		//context.parent ! Done
-		context.stop(self)
-	}
-
 	private def startIn(duration: FiniteDuration): Unit = {
 		context.become(active)
-		context.system.scheduler.scheduleOnce(duration*(Random.nextInt(2)+1), self, WantUseResource)
+		context.system.scheduler.scheduleOnce(duration, self, WantUseResource)
 	}
  
  	def receive = passive
@@ -122,78 +127,86 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 
 	def active : Receive = LoggingReceive {
   		case Request(fromId) =>
+			println(pid + " receive REQUEST from " + fromId)
 			pending.enqueue(fromId -> sender)
 			val (id, to) = pending.head
      		if (to == sender) {
 				sendPermission()
 			}
 		case Permission(fromId) =>
-			permissions += sender
-			val (id, from) = requests.dequeue
-			if (!isLeafOf(id, tree)){
-				val lid = left(id)
-				val rid = right(id)
-				if (lid < tree.length && rid < tree.length) {
-					// Try to get permission from internodes (left or right)
-					// TODO: use futures and timeout
-					if(dice) {
+			println(pid + " receive PERMISSION from " + fromId)
+			if (!(crashed contains sender)) {
+				permissions += sender
+				val (id, from) = requests.dequeue
+				if (!isLeafOf(id, tree)){
+					val lid = left(id)
+					val rid = right(id)
+					if (lid < tree.length && rid < tree.length) {
+						// Try to get permission from internodes (left or right)
+						// TODO: use futures and timeout
 						requests.enqueue(lid -> tree(lid))
-					} else {
-						requests.enqueue(rid -> tree(rid))
+					} else if (lid < tree.length) {
+							requests.enqueue(lid -> tree(lid))
+					} else if(rid < tree.length) {
+							requests.enqueue(rid -> tree(rid))
 					}
-				} else if (lid < tree.length) {
-						requests.enqueue(lid -> tree(lid))
-				} else if(rid < tree.length) {
-						requests.enqueue(rid -> tree(rid))
 				}
-			}
-			if (requests.nonEmpty) {
-				sendRequest()
-			}
-			else {
-				// Enter in critical section
-				resource ! Resource.Add(pid, self, permissions)
-
-				val source = Source.fromFile("shared.txt")
-				var append : Boolean = true
-				var c = 'a'
-//				val regex = """([a-z])\s(\d)\s[-](\s\d)+""".r
-				if(source.hasNext) {
-//					val lastLine = source.getLines.toList.last.split(" ") match { case Array(x, y) => (x, y.toInt)}
-					val lastLine = source.getLines.toList.last.lines.map(_.split(" ")).map(split => (split(0), split(1).toInt, split.slice(3,split.size).takeWhile(_ != '\n'))).toList.view
-					c = getNextLetter(lastLine(0)._1)
-					if (c == 'a') append = false
+				if (requests.nonEmpty) {
+					sendRequest()
 				}
-				source.close()
+				else {
+					// Enter in critical section
+					resource ! Resource.Add(pid, self, permissions)
 
-				val dest = new PrintWriter(new FileWriter("shared.txt", append))
-				dest.print(c.toString + " " + pid + " - ")
-				permissions.foreach(p => dest.print(procMap(p) + " "))
-				dest.println()
-				dest.close()
+					val source = Source.fromFile("shared.txt")
+					var append : Boolean = true
+					var c = 'a'
+//					val regex = """([a-z])\s(\d)\s[-](\s\d)+""".r
+					if(source.hasNext) {
+//						val lastLine = source.getLines.toList.last.split(" ") match { case Array(x, y) => (x, y.toInt)}
+						val lastLine = source.getLines.toList.last.lines.map(_.split(" ")).map(split => (split(0), split(1).toInt, split.slice(3,split.size).takeWhile(_ != '\n'))).toList.view
+						c = getNextLetter(lastLine(0)._1)
+						if (c == 'a') append = false
+					}
+					source.close()
+
+					val dest = new PrintWriter(new FileWriter("shared.txt", append))
+					dest.print(c.toString + " " + pid + " - ")
+					permissions.foreach(p => dest.print(procMap(p) + " "))
+					dest.println()
+					dest.close()
 				
-				//context.become(critical)
-				permissions.foreach(_ ! Released)
-				permissions.clear()
-				startIn(waitTime)
-				// Exit critical section
+					//context.become(critical)
+					//permissions.foreach(_ ! Released)
+					for (to <- permissions) { context.system.scheduler.scheduleOnce(waitTime, to, Released)}
+					permissions.clear()
+					startIn(waitTime)
+					// Exit critical section
+				}
 			}
 		case Released =>
+			println(pid + " receive RELEASED from " + procMap(sender))
 			pending.dequeue
 			sendPermission()
 		case Crashed(id, crash) =>
+			println(pid + " receive CRASHED from " + id)
+			// FIXME: each process should detect failures by itself
 			if (pid == id)
-				context.become(passive)
+				context.stop(self)
+//				context.become(passive)
 			crashed += crash
 			if (requests.nonEmpty) {
+				println(pid + " CRASH REQUESTS: " + requests + " HEAD " + requests.head)
 				val (rid, ractor) = requests.head
 				if (ractor == crash)
 					headRequestCrashed()
 			}
 			if (pending.nonEmpty) {
+				println(pid + " CRASH PENDING: " + pending)
 				val (hid, hactor) = pending.head
 				if (hactor == crash) {
 					pending.dequeue
+					println(pid + " CRASH PENDING DEQUEUE: " + pending)
 					sendPermission()
 				}
 			}
@@ -204,7 +217,7 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 		case Update =>
 			crashed -= sender
 		case Abort	=> 
-			stop()
+			context.stop(self)
 		case Sleep =>
 			context.become(passive)
 		case _  =>
