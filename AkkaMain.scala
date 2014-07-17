@@ -16,12 +16,11 @@ object AkkaMain {
 class AkkaMain extends Actor {
 	import AkkaMain._
 
-	val resource = context.actorOf(Props[Resource], "SharedResource")
 	var crashed : Set[Int] = Set.empty[Int]
 
 	def gen_simple_binary_tree(n: Int, t: Vector[ActorRef]): Vector[ActorRef] =
-		if (n == 1) Vector() :+ context.actorOf(Process.props(n-1, resource), s"p${n-1}")
-		else gen_simple_binary_tree(n-1, t) :+ context.actorOf(Process.props(n-1, resource), s"p${n-1}")
+		if (n == 1) Vector() :+ context.actorOf(Process.props(n-1), s"p${n-1}")
+		else gen_simple_binary_tree(n-1, t) :+ context.actorOf(Process.props(n-1), s"p${n-1}")
 
 	def get_out(i: Int) {
 //		var i = Random.nextInt(tree.length/2)

@@ -13,7 +13,7 @@ import akka.event.LoggingReceive
 import Quorum._
 
 object Process {
-	def props(id: Int, resource: ActorRef): Props = Props(new Process(id, resource))
+	def props(id: Int): Props = Props(new Process(id))
 	// Protocol Messages
 	case class Crashed(id: Int, crash: ActorRef)
 	case class Request(sid: Int)
@@ -26,7 +26,7 @@ object Process {
 	case object Sleep
 }
 
-class Process(pid: Int, resource: ActorRef) extends Actor {
+class Process(pid: Int) extends Actor {
 	import Process._
 	private var tree : Vector[ActorRef] = Vector()
   	private var permissions : Set[ActorRef] =  Set.empty[ActorRef]
@@ -111,7 +111,7 @@ class Process(pid: Int, resource: ActorRef) extends Actor {
 			println(pid + " receive REQUEST from " + fromId)
 			pending.enqueue(fromId -> sender)
 			val (id, to) = pending.head
-     		if (to == sender) {
+			if (to == sender) {
 				sendPermission()
 			}
 		case Permission(fromId) =>
